@@ -12,6 +12,7 @@ use URI::Escape;
 
 use Dancer2::Core::Types;
 use Dancer2::Core::Request::Upload;
+use Dancer2::Core::Cookie;
 
 with 'Dancer2::Core::Role::Headers';
 
@@ -35,11 +36,10 @@ method, like in the following example:
 A route handler should not read the environment by itself, but should instead
 use the current request object.
 
-=head1 HTTP environment variables
+=head1 Common HTTP request headers
 
-All HTTP environment variables that are in %ENV will be provided in the
-L<Dancer2::Core::Request> object through specific accessors, here are those
-supported:
+Commonly used client-supplied HTTP request headers are available through
+specific accessors, here are those supported:
 
 =over 4
 
@@ -79,23 +79,14 @@ supported:
 
 =back
 
+With the exception of C<host>, these accessors are lookups into the PSGI env
+hash reference.
+
+Note that the L<PSGI> specification prefixes client-supplied request headers with
+C<HTTP_>. For example, a C<X-Requested-With> header has the key
+C<HTTP_X_REQUESTED_WITH> in the PSGI env hashref.
+
 =cut
-
-=head1 EXTRA SPEED
-
-Install URL::Encode::XS and CGI::Deurl::XS for extra speed.
-
-Dancer2::Core::Request will use it if they detect their presence.
-
-=cut
-
-# check presence of XS module to speedup request
-eval { require URL::Encode::XS; };
-our $XS_URL_DECODE = !$@;
-
-eval { require CGI::Deurl::XS; };
-our $XS_PARSE_QUERY_STRING = !$@;
-
 
 # add an attribute for each HTTP_* variables
 # (HOST is managed manually)
@@ -115,15 +106,31 @@ my @http_env_keys = (qw/
 foreach my $attr ( @http_env_keys ) {
     has $attr => (
         is      => 'ro',
-        isa     => Str,
+        isa     => Maybe[Str],
         lazy    => 1,
         default => sub { $_[0]->env->{ 'HTTP_' . ( uc $attr ) } },
     );
 }
 
+=head1 EXTRA SPEED
+
+Install URL::Encode::XS and CGI::Deurl::XS for extra speed.
+
+Dancer2::Core::Request will use it if they detect their presence.
+
+=cut
+
+# check presence of XS module to speedup request
+eval { require URL::Encode::XS; };
+our $XS_URL_DECODE = !$@;
+
+eval { require CGI::Deurl::XS; };
+our $XS_PARSE_QUERY_STRING = !$@;
+
+
 =method env()
 
-Return the current environment (C<%ENV>), as a hashref.
+Return the current PSGI environment hash reference.
 
 =cut
 
@@ -133,6 +140,35 @@ has env => (
     isa     => HashRef,
     default => sub { {} },
 );
+
+
+# a buffer for per-request variables
+has vars => (
+    is      => 'ro',
+    isa     => HashRef,
+    default => sub { {} },
+);
+
+=method var
+
+By-name interface to variables stored in this request object.
+
+  my $stored = $request->var('some_variable');
+
+returns the value of 'some_variable', while
+
+  $request->var('some_variable' => 'value');
+
+will set it.
+
+=cut
+
+sub var {
+    my $self = shift;
+    @_ == 2
+      ? $self->vars->{ $_[0] } = $_[1]
+      : $self->vars->{ $_[0] };
+}
 
 
 =method path()
@@ -171,9 +207,10 @@ sub _build_path {
 }
 
 has path_info => (
-    is      => 'rw',
+    is      => 'ro',
     isa     => Str,
     lazy    => 1,
+    writer  => 'set_path_info',
     builder => '_build_path_info',
 );
 
@@ -333,18 +370,21 @@ has body_is_parsed => (
 );
 
 has is_behind_proxy => (
-    is      => 'rw',
+    is      => 'ro',
     isa     => Bool,
+    lazy    => 1,
     default => sub {0},
 );
 
 sub host {
     my ($self) = @_;
 
-    return ( $self->is_behind_proxy )
-      ? ( $self->env->{HTTP_X_FORWARDED_HOST}
-          || $self->env->{X_FORWARDED_HOST} )
-      : $self->env->{HTTP_HOST};
+    if ( $self->is_behind_proxy ) {
+        my @hosts = split /\s*,\s*/, $self->env->{HTTP_X_FORWARDED_HOST}, 2;
+        return $hosts[0];
+    } else {
+        return $self->env->{'HTTP_HOST'};
+    }
 }
 
 
@@ -364,7 +404,7 @@ objects.
 
 It uses the environment hash table given to build the request object:
 
-    Dancer2::Core::Request->new(env => \%ENV);
+    Dancer2::Core::Request->new(env => \%env);
 
 It also accepts the C<body_is_parsed> boolean flag, if the new request object should
 not parse request body.
@@ -403,7 +443,7 @@ Return script_name from the environment.
 # aliases, kept for backward compat
 sub agent                 { $_[0]->user_agent }
 sub remote_address        { $_[0]->address }
-sub forwarded_for_address { $_[0]->env->{'X_FORWARDED_FOR'} }
+sub forwarded_for_address { $_[0]->env->{HTTP_X_FORWARDED_FOR} }
 sub address               { $_[0]->env->{REMOTE_ADDR} }
 sub remote_host           { $_[0]->env->{REMOTE_HOST} }
 sub protocol              { $_[0]->env->{SERVER_PROTOCOL} }
@@ -423,9 +463,9 @@ sub scheme {
     my ($self) = @_;
     my $scheme;
     if ( $self->is_behind_proxy ) {
+        # Note the 'HTTP_' prefix the PSGI spec adds to headers.
         $scheme =
-             $self->env->{'X_FORWARDED_PROTOCOL'}
-          || $self->env->{'HTTP_X_FORWARDED_PROTOCOL'}
+             $self->env->{'HTTP_X_FORWARDED_PROTOCOL'}
           || $self->env->{'HTTP_X_FORWARDED_PROTO'}
           || $self->env->{'HTTP_FORWARDED_PROTO'}
           || "";
@@ -477,8 +517,11 @@ sub deserialize {
 
     return unless $self->serializer->support_content_type($content_type);
 
+    # The latest draft of the RFC does not forbid DELETE to have content,
+    # rather the behaviour is undefined. Take the most lenient route and
+    # deserialize any content on delete as well.
     return
-      unless grep { $self->method eq $_ } qw/ PUT POST PATCH /;
+      unless grep { $self->method eq $_ } qw/ PUT POST PATCH DELETE /;
 
     # try to deserialize
     my $body = $self->_read_to_end();
@@ -576,76 +619,6 @@ Return a string representing the request object (eg: C<"GET /some/path">)
 sub to_string {
     my ($self) = @_;
     return "[#" . $self->id . "] " . $self->method . " " . $self->path;
-}
-
-# Create a new request which is a clone of the current one, apart
-# from the path location, which points instead to the new location
-# TODO this could be written in a more clean manner with a clone mechanism
-sub make_forward_to {
-    my ( $self, $url, $params, $options ) = @_;
-
-    # we clone the env to make sure we don't alter the existing one in $self
-    my $env = { %{ $self->env } };
-
-    $env->{PATH_INFO} = $url;
-
-    my $new_request = ( ref $self )->new( env => $env, body_is_parsed => 1 );
-    my $new_params = _merge_params( scalar( $self->params ), $params || {} );
-
-    if ( exists( $options->{method} ) ) {
-        $new_request->method( $options->{method} );
-    }
-
-    # Copy params (these are already decoded)
-    $new_request->{_params}       = $new_params;
-    $new_request->{_body_params}  = $self->{_body_params};
-    $new_request->{_query_params} = $self->{_query_params};
-    $new_request->{_route_params} = $self->{_route_params};
-    $new_request->{body}          = $self->body;
-    $new_request->{headers}       = $self->headers;
-
-    return $new_request;
-}
-
-=method forward($request, $new_location)
-
-Create a new request which is a clone of the current one, apart
-from the path location, which points instead to the new location.
-This is used internally to chain requests using the forward keyword.
-
-Note that the new location should be a hash reference. Only one key is
-required, the C<to_url>, that should point to the URL that forward
-will use. Optional values are the key C<params> to a hash of
-parameters to be added to the current request parameters, and the key
-C<options> that points to a hash of options about the redirect (for
-instance, C<method> pointing to a new request method).
-
-=cut
-
-sub forward {
-    my ( $self, $context, $url, $params, $options ) = @_;
-    my $new_request = $self->make_forward_to( $url, $params, $options );
-
-    my $new_response = Dancer2->runner->server->dispatcher->dispatch(
-        $new_request->env,
-        $new_request,
-        $context,
-    );
-    # halt the response, so no further processing is done on this request.
-    # (any after hooks will have already been run)
-    $new_response->halt;
-    $context->response($new_response);
-    $context->with_return->($new_response) if $context->has_with_return;
-    return $new_response; # Should never be called..
-}
-
-sub _merge_params {
-    my ( $params, $to_add ) = @_;
-
-    for my $key ( keys %$to_add ) {
-        $params->{$key} = $to_add->{$key};
-    }
-    return $params;
 }
 
 =method base()
@@ -874,7 +847,7 @@ table provided by C<uploads()>. It looks at the calling context and returns a
 corresponding value.
 
 If you have many file uploads under the same name, and call C<upload('name')> in
-an array context, the accesor will unroll the ARRAY ref for you:
+an array context, the accessor will unroll the ARRAY ref for you:
 
     my @uploads = request->upload('many_uploads'); # OK
 
@@ -905,7 +878,7 @@ sub _build_params {
     # _before_ we get there, so we have to save it first
     my $previous = $self->_has_params ? $self->_params : {};
 
-    # now parse environement params...
+    # now parse environment params...
     $self->_parse_get_params();
     if ( $self->body_is_parsed ) {
         $self->{_body_params} ||= {};
@@ -1036,7 +1009,7 @@ sub _init_request_headers {
                 ( my $field = $_ ) =~ s/^HTTPS?_//;
                 ( $field => $env->{$_} );
               }
-              grep {/^(?:HTTP|CONTENT|COOKIE)/i} keys %$env
+              grep {/^(?:HTTP|CONTENT)/i} keys %$env
         )
     );
 }
@@ -1084,20 +1057,20 @@ cookies and values are L<Dancer2::Core::Cookie> objects.
 =cut
 
 has cookies => (
-    is      => 'rw',
+    is      => 'ro',
     isa     => HashRef,
     lazy    => 1,
     builder => '_build_cookies',
 );
 
 sub _build_cookies {
-    my ($self) = @_;
-
-    my $env_str = $self->env->{COOKIE} || $self->env->{HTTP_COOKIE};
-    return {} unless defined $env_str;
-
+    my $self    = shift;
     my $cookies = {};
-    foreach my $cookie ( split( /[,;]\s/, $env_str ) ) {
+
+    my $http_cookie = $self->header('Cookie');
+    return $cookies unless defined $http_cookie; # nothing to do
+
+    foreach my $cookie ( split( /[,;]\s/, $http_cookie ) ) {
 
         # here, we don't want more than the 2 first elements
         # a cookie string can contains something like:
@@ -1113,7 +1086,6 @@ sub _build_cookies {
     }
     return $cookies;
 }
-
 
 1;
 

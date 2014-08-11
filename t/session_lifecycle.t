@@ -147,12 +147,12 @@ foreach my $engine (@engines) {
 
             get '/destroy_session' => sub {
                 my $name = session('name') || '';
-                context->destroy_session;
+                app->destroy_session;
                 return "destroyed='$name'";
             };
 
             get '/churn_session' => sub {
-                context->destroy_session;
+                app->destroy_session;
                 session name => 'damian';
                 return "churned";
             };
@@ -171,7 +171,8 @@ foreach my $engine (@engines) {
                 port         => $port
             );
 
-            Dancer2->runner->server->port($port);
+            # we're overiding a RO attribute only for this test!
+            Dancer2->runner->{'port'} = $port;
             start;
         },
     );

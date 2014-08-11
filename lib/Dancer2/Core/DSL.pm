@@ -55,6 +55,7 @@ sub dsl_keywords {
         path                 => { is_global => 1 },
         post                 => { is_global => 1 },
         prefix               => { is_global => 1 },
+        psgi_app             => { is_global => 1 },
         push_header          => { is_global => 0 },
         put                  => { is_global => 1 },
         redirect             => { is_global => 0 },
@@ -100,7 +101,6 @@ sub false {0}
 sub dirname { shift and Dancer2::FileUtils::dirname(@_) }
 sub path    { shift and Dancer2::FileUtils::path(@_) }
 
-
 sub config { shift->app->settings }
 
 sub engine { shift->app->engine(@_) }
@@ -130,7 +130,35 @@ sub set { shift->setting(@_) }
 
 sub template { shift->app->template(@_) }
 
-sub session { shift->app->session(@_) }
+sub session {
+    my ( $self, $key, $value ) = @_;
+
+    # shortcut reads if no session exists, so we don't
+    # instantiate sessions for no reason
+    if ( @_ == 2 ) {
+        return unless $self->app->has_session;
+    }
+
+    my $session = $self->app->session
+        || croak "No session available, a session engine needs to be set";
+
+    $self->app->setup_session;
+
+    # return the session object if no key
+    @_ == 1 and return $session;
+
+    # read if a key is provided
+    @_ == 2 and return $session->read($key);
+
+
+    # write to the session or delete if value is undef
+    if ( defined $value ) {
+        $session->write( $key => $value );
+    }
+    else {
+        $session->delete($key);
+    }
+}
 
 sub send_file { shift->app->send_file(@_) }
 
@@ -151,7 +179,7 @@ sub prefix {
       : $app->lexical_prefix(@_);
 }
 
-sub halt { shift->app->context->response->halt }
+sub halt { shift->app->halt }
 
 sub _route_parameters {
     my ( $regexp, $code, $options );
@@ -265,6 +293,12 @@ sub start { shift->runner->start }
 
 sub dance { shift->start(@_) }
 
+sub psgi_app {
+    my $self = shift;
+
+    $self->runner->psgi_app( [ $self->app ] );
+}
+
 #
 # Response alterations
 #
@@ -274,17 +308,20 @@ sub push_header  { shift->response->push_header(@_) }
 sub header       { shift->response->header(@_) }
 sub headers      { shift->response->header(@_) }
 sub content_type { shift->response->content_type(@_) }
-sub pass         { shift->response->pass }
+sub pass         { shift->app->pass }
 
 #
 # Route handler helpers
 #
 
-sub context { shift->app->context }
+sub context {
+    carp "DEPRECATED: please use the 'app' keyword instead of 'context'";
+    shift->app;
+}
 
-sub request { shift->context->request }
+sub request { shift->app->request }
 
-sub response { shift->context->response }
+sub response { shift->app->response }
 
 sub upload { shift->request->upload(@_) }
 
@@ -294,21 +331,19 @@ sub uri_for { shift->request->uri_for(@_) }
 
 sub splat { shift->request->splat }
 
-sub params { shift->request->params }
+sub params { shift->request->params(@_) }
 
 sub param { shift->request->param(@_) }
 
-sub redirect { shift->context->redirect(@_) }
+sub redirect { shift->app->redirect(@_) }
 
-sub forward {
-    my $self = shift;
-    $self->request->forward($self->context, @_);
-}
+sub forward { shift->app->forward(@_) }
 
-sub vars { shift->context->vars }
-sub var  { shift->context->var(@_) }
+sub vars { shift->request->vars }
+sub var  { shift->request->var(@_) }
 
-sub cookies { shift->context->cookies }
+sub cookies { shift->request->cookies }
+sub cookie { shift->app->cookie(@_) }
 
 sub mime {
     my $self = shift;
@@ -322,20 +357,22 @@ sub mime {
     }
 }
 
-sub cookie { shift->context->cookie(@_) }
-
 sub send_error {
     my ( $self, $message, $status ) = @_;
 
     my $serializer = $self->app->engine('serializer');
     my $x = Dancer2::Core::Error->new(
-        message => $message,
-        context => $self->app->context,
-        ( status => $status ) x !!$status,
-        ( serializer => $serializer ) x !!$serializer,
+          message    => $message,
+          app        => $self->app,
+        ( status     => $status     )x!! $status,
+        ( serializer => $serializer )x!! $serializer,
     )->throw;
 
-    $x;
+    # return if there is a with_return coderef
+    $self->app->with_return->($x)
+      if $self->app->has_with_return;
+
+    return $x;
 }
 
 #
@@ -343,37 +380,37 @@ sub send_error {
 #
 
 sub from_json {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/JSON.pm';
     Dancer2::Serializer::JSON::from_json(@_);
 }
 
 sub to_json {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/JSON.pm';
     Dancer2::Serializer::JSON::to_json(@_);
 }
 
 sub from_yaml {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/YAML.pm';
     Dancer2::Serializer::YAML::from_yaml(@_);
 }
 
 sub to_yaml {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/YAML.pm';
     Dancer2::Serializer::YAML::to_yaml(@_);
 }
 
 sub from_dumper {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/Dumper.pm';
     Dancer2::Serializer::Dumper::from_dumper(@_);
 }
 
 sub to_dumper {
-    my $app = shift->app;
+    shift; # remove first element
     require 'Dancer2/Serializer/Dumper.pm';
     Dancer2::Serializer::Dumper::to_dumper(@_);
 }

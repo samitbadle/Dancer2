@@ -104,7 +104,7 @@ To define a PUT action, use the L<put|Dancer2::Manual/put> keyword.
 a PUT request should replace the existing resource with that specified - for
 instance - if you wanted to just update an email address for a user, you'd have
 to specify all attributes of the user again; to make a partial update, a
-C<PATCH> request is used.
+PATCH request is used.
 
 =item B<PATCH> The PATCH method updates some attributes of an existing resource.
 
@@ -208,7 +208,7 @@ From here, any route handler is defined to /home/*
 You can unset the prefix value
 
     prefix '/'; # or: prefix undef;
-    get '/page1' => sub {}; will match /page1
+    get '/page1' => sub {}; # will match /page1
 
 Alternatively, to prevent you from ever forgetting to undef the prefix,
 you can use lexical prefix like this:
@@ -217,7 +217,7 @@ you can use lexical prefix like this:
       get '/page1' => sub {}; # will match '/home/page1'
     }; ## prefix reset to previous value on exit
 
-    get '/page1' => sub {}; will match /page1
+    get '/page1' => sub {}; # will match /page1
 
 =head2 Action Skipping
 
@@ -272,11 +272,11 @@ define their own.
 =head2 Request workflow
 
 C<before> hooks are evaluated before each request within the context of the
-request and receives as argument the context (a L<Dancer2::Core::Context>
+request and receives as argument the app (a L<Dancer2::Core::App>
 object).
 
 It's possible to define variables which will be accessible in the action blocks
-with the keyword 'var'.
+with the keyword C<var>.
 
     hook before => sub {
         var note => 'Hi there';
@@ -403,10 +403,10 @@ this hook.>
 
 C<on_route_exception> is called when an exception has been caught, at the
 route level, just before rethrowing it higher. This hook receives a
-L<Dancer2::Core::Context> and the error as arguments.
+L<Dancer2::Core::App> and the error as arguments.
 
   hook on_route_exception => sub {
-    my ($context, $error) = @_;
+    my ($app, $error) = @_;
   };
 
 =head2 File rendering
@@ -723,9 +723,75 @@ Or even if you want your index page to be a plain old index.html file, just do:
     };
 
 
+=head1 EXPORTS
+
+By default, C<use Dancer2> exports all the DSL keywords and sets up the
+webapp under the name of the current package. The following tags control exports
+and webapp namespace.
+
+=over 4
+
+=item B<!keyword>
+
+If you want to prevent Dancer2 from exporting specific keywords; perhaps you
+plan to implement them yourself in a different way, or they clash with another
+module you're loading, you can simply exclude them:
+
+    use Test::More;
+    use Dancer2 qw(!pass);
+
+The above would import all keywords as normal, with the exception of C<pass>.
+
+=item B<appname>
+
+A larger application may split its source between several packages to aid
+maintainability. Dancer2 will create a separate application for each package,
+each having separate hooks, config and/or engines. You can force Dancer2 to
+collect the route and hooks into a single application with the C<appname>
+tag; e.g.
+
+    package MyApp;
+    use Dancer2;
+    get '/foo' => sub {...};
+
+    package MyApp::Private;
+    use Dancer2 appname => MyApp;
+    get '/bar' => sub {...};
+
+The above would add the C<bar> route to the MyApp application. Dancer2 will not
+create an application with the name C<MyApp::Private>.
+
+=back
+
+When you C<use Dancer2>, you get an C<import> method added into the current
+package. This B<will> override previously declared import methods from other
+sources, such as L<Exporter>. Dancer2 applications support the following tags
+on import:
+
+=over 4
+
+=item B<with>
+
+The C<with> tag allows an app to pass one or more config entries to another app,
+when it C<use>s it.
+
+    package MyApp;
+    use Dancer2;
+
+    set session => 'YAML';
+    use Blog with => { session => engine('session') };
+
+In this example, the session engine is passed to the C<Blog> app. That way,
+anything done in the session will be shared between both apps.
+
+Anything that is defined in the config entry can be passed that way. If we want
+to pass the whole config object, it can be done like so:
+
+    use SomeApp with => { %{config()} };
+
+=back
 
 =head1 DSL KEYWORDS
-
 
 Dancer2 provides you with a DSL (Domain-Specific Language) which makes
 implementing your web application trivial.
@@ -900,8 +966,8 @@ B<POST>. That is because C<forward> chains the same type of route the user
 reached. If it was a B<GET>, it will remain a B<GET> (but if you do need to
 change the method, you can do so; read on below for details.)
 
-B<WARNING> : Any code after a c<forward> is ignored, until the end of the route.
-It's not necessary to use C<return> with c<forward> anymore.
+B<WARNING> : Any code after a C<forward> is ignored, until the end of the route.
+It's not necessary to use C<return> with C<forward> anymore.
 
     get '/foo/:article_id' => sub {
         if ($condition) {
@@ -913,7 +979,7 @@ It's not necessary to use C<return> with c<forward> anymore.
         more_stuff();
     };
 
-Note that c<forward> doesn't parse GET arguments. So, you can't use
+Note that C<forward> doesn't parse GET arguments. So, you can't use
 something like:
 
     forward '/home?authorized=1';
@@ -923,7 +989,7 @@ to the actual parameters:
 
     forward '/home', { authorized => 1 };
 
-Finally, you can add some more options to the c<forward> method, in a
+Finally, you can add some more options to the C<forward> method, in a
 third argument, also as a HashRef. That option is currently
 only used to change the method of your request. Use with caution.
 
@@ -1063,8 +1129,9 @@ commonly-used methods are summarized below:
 
 I<This method should be called from a route handler>.
 It's an alias for the
-L<Dancer2::Core::Request params accessor|Dancer2::Core::Request/"params">. It
-returns an hash reference to all defined parameters. Check C<param> below to
+L<Dancer2::Core::Request params accessor|Dancer2::Core::Request/"params-source">.
+It returns a hash (in list context) or a hash reference (in scalar context)
+to all defined parameters. Check C<param> below to
 access quickly to a single parameter value.
 
 =head2 param
@@ -1147,7 +1214,7 @@ From here, any route handler is defined to /home/*:
 You can unset the prefix value:
 
     prefix undef;
-    get '/page1' => sub {}; will match /page1
+    get '/page1' => sub {}; # will match /page1
 
 For a safer alternative you can use lexical prefix like this:
 
@@ -1207,9 +1274,9 @@ different site or within the application:
         # Any code after the redirect will not be executed.
     };
 
-B<WARNING> : Issuing a c<redirect> immediately exits the current route.
-Thus, any code after a c<redirect> is ignored, until the end of the route.
-So it's not necessary anymore to use C<return> with c<redirect>.
+B<WARNING> : Issuing a C<redirect> immediately exits the current route.
+Thus, any code after a C<redirect> is ignored, until the end of the route.
+So it's not necessary anymore to use C<return> with C<redirect>.
 
 You can also force Dancer to return a specific 300-ish HTTP response code:
 
@@ -1221,7 +1288,7 @@ You can also force Dancer to return a specific 300-ish HTTP response code:
 
 Returns a L<Dancer2::Core::Request> object representing the current request.
 
-See the L<Dancer2::Core::Request> documention for the methods you can call, for
+See the L<Dancer2::Core::Request> documentation for the methods you can call, for
 example:
 
     request->referer;         # value of the HTTP referer header
@@ -1302,7 +1369,7 @@ content read, and then decide what to do with each chunk:
         );
     }
 
-You can use C<around> to all get all the content (whether a filehandle if it's
+You can use C<around> to get all the content (whether a filehandle if it's
 a regular file or a full string if it's a scalar ref) and decide what to do with
 it:
 
@@ -1382,7 +1449,7 @@ Note that Dancer is unable to guess the content type from the data
 contents. Therefore you might need to set the C<content_type>
 properly. For this kind of usage an attribute named C<filename> can be
 useful.  It is used as the Content-Disposition header, to hint the
-brower about the filename it should use.
+browser about the filename it should use.
 
    return send_file( \$data, content_type => 'image/png'
                              filename     => 'onion.png' );
@@ -1433,7 +1500,7 @@ You may also need to clear a session:
     # destroy session
     get '/logout' => sub {
         ...
-        context->destroy_session;
+        app->destroy_session;
         ...
     };
 
@@ -1489,6 +1556,14 @@ choices).
 This keyword should be called at the very end of the script, once all routes
 are defined.  At this point, Dancer takes over control.
 
+=head2 psgi_app
+
+Returns the PSGI coderef for the current (and only the current) application
+
+This keyword will typically be used as a method to get the psgi coderef for
+testing, or building a larger application via L<Plack::Builder> from
+independent parts.
+
 =head2 status
 
 Changes the status code provided by an action.  By default, an action will
@@ -1524,7 +1599,7 @@ build a response with the current template engine:
     };
 
 Note that C<template> simply returns the content, so when you use it in a route
-handler, if execution of the the route handler should stop at that point, make
+handler, if execution of the route handler should stop at that point, make
 sure you use 'return' to ensure your route handler returns the content.
 
 Since template just returns the result of rendering the template, you can also
@@ -1667,7 +1742,7 @@ versions:
 Provides an accessor for variables shared between filters and route handlers.
 Given a key/value pair, it sets a variable:
 
-    hook before sub {
+    hook before => sub {
         var foo => 42;
     };
 

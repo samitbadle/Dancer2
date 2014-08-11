@@ -4,7 +4,6 @@ use Test::More import => ['!pass'];
 use Carp 'croak';
 
 use Dancer2;
-use Dancer2::Test;
 use Dancer2::Core::App;
 use Dancer2::Core::Route;
 use Dancer2::Core::Dispatcher;
@@ -30,7 +29,7 @@ $app->add_route(
 $app->add_route(
     method => 'get',
     regexp => '/error',
-    code   => sub { Fail->fail; },
+    code   => sub { Fail->fail },
 );
 
 # A chain of two route for /user/$foo
@@ -38,9 +37,9 @@ $app->add_route(
     method => 'get',
     regexp => '/user/:name',
     code   => sub {
-        my $ctx = shift;
-        $buffer->{user} = $ctx->request->params->{'name'};
-        $ctx->response->has_passed(1);
+        my $app = shift;
+        $buffer->{user} = $app->request->params->{'name'};
+        $app->response->has_passed(1);
     },
 );
 
@@ -48,8 +47,8 @@ $app->add_route(
     method => 'get',
     regexp => '/user/*?',
     code   => sub {
-        my $ctx = shift;
-        "Hello " . $ctx->request->params->{'name'};
+        my $app = shift;
+        "Hello " . $app->request->params->{'name'};
     },
 );
 
@@ -62,7 +61,8 @@ my @tests = (
         expected => [
             200,
             [   'Content-Length' => 4,
-                'Content-Type'   => 'text/html; charset=UTF-8'
+                'Content-Type'   => 'text/html; charset=UTF-8',
+                'Server'         => "Perl Dancer2 $Dancer2::VERSION",
             ],
             ["home"]
         ]
@@ -74,7 +74,8 @@ my @tests = (
         expected => [
             200,
             [   'Content-Length' => 12,
-                'Content-Type'   => 'text/html; charset=UTF-8'
+                'Content-Type'   => 'text/html; charset=UTF-8',
+                'Server'         => "Perl Dancer2 $Dancer2::VERSION",
             ],
             ["Hello Johnny"]
         ]
@@ -88,6 +89,7 @@ my @tests = (
             [   'Location'       => 'http://perldancer.org',
                 'Content-Length' => '0',
                 'Content-Type'   => 'text/html',
+                'Server'         => "Perl Dancer2 $Dancer2::VERSION",
             ],
             ['']
         ]
@@ -109,11 +111,11 @@ $app->add_hook(
     Dancer2::Core::Hook->new(
         name => 'before',
         code => sub {
-            my $ctx = shift;
-            if ( $ctx->request->path_info eq '/haltme' ) {
-                $ctx->response->header( Location => 'http://perldancer.org' );
-                $ctx->response->status(302);
-                $ctx->response->is_halted(1);
+            my $app = shift;
+            if ( $app->request->path_info eq '/haltme' ) {
+                $app->response->header( Location => 'http://perldancer.org' );
+                $app->response->status(302);
+                $app->response->is_halted(1);
             }
         },
     )
@@ -124,8 +126,8 @@ $app->add_hook(
     Dancer2::Core::Hook->new(
         name => 'before',
         code => sub {
-            my $ctx = shift;
-            if ( $ctx->request->path_info eq '/haltme' ) {
+            my $app = shift;
+            if ( $app->request->path_info eq '/haltme' ) {
                 $was_in_second_filter =
                   1;   # should not happen because first filter halted the flow
             }
@@ -147,20 +149,21 @@ my $counter = 0;
 foreach my $test (@tests) {
     my $env      = $test->{env};
     my $expected = $test->{expected};
+    my $path     = $env->{'PATH_INFO'};
 
     my $resp = $dispatcher->dispatch($env)->to_psgi;
 
-    is $resp->[0] => $expected->[0], "Return code ok.";
+    is( $resp->[0], $expected->[0], "[$path] Return code ok" );
 
-    ok( Dancer2::Test::_include_in_headers( $resp->[1], $expected->[1] ),
-        "expected headers are there"
-    );
+    my %got_headers = @{ $resp->[1] };
+    my %exp_headers = @{ $expected->[1] };
+    is_deeply( \%got_headers, \%exp_headers, "[$path] Correct headers" );
 
     if ( ref( $expected->[2] ) eq "Regexp" ) {
-        like $resp->[2][0] => $expected->[2], "Contents ok. (test $counter)";
+        like $resp->[2][0] => $expected->[2], "[$path] Contents ok. (test $counter)";
     }
     else {
-        is_deeply $resp->[2] => $expected->[2], "Contents ok. (test $counter)";
+        is_deeply $resp->[2] => $expected->[2], "[$path] Contents ok. (test $counter)";
     }
     $counter++;
 }

@@ -82,7 +82,7 @@ foreach my $engine (@engines) {
             };
 
             get '/cleanup' => sub {
-                context->destroy_session;
+                app->destroy_session;
                 return scalar(@to_destroy);
             };
 
@@ -100,7 +100,8 @@ foreach my $engine (@engines) {
                 port         => $port
             );
 
-            Dancer2->runner->server->port($port);
+            # we're overiding a RO attribute only for this test!
+            Dancer2->runner->{'port'} = $port;
             start;
         },
     );

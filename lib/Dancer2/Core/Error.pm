@@ -1,12 +1,12 @@
+package Dancer2::Core::Error;
 # ABSTRACT: Class representing fatal errors
 
-package Dancer2::Core::Error;
 use Moo;
 use Carp;
 use Dancer2::Core::Types;
 use Dancer2::Core::HTTP;
 use Data::Dumper;
-use Dancer2::FileUtils 'path';
+use Dancer2::FileUtils qw/path open_file/;
 
 =head1 SYNOPSIS
 
@@ -43,11 +43,20 @@ Create a new Dancer2::Core::Error object. For available arguments see ATTRIBUTES
 
 =cut
 
+has app => (
+    is        => 'ro',
+    isa       => InstanceOf['Dancer2::Core::App'],
+    predicate => 'has_app',
+);
+
 has show_errors => (
     is      => 'ro',
     isa     => Bool,
     default => sub {
-        $_[0]->context->app->setting('show_errors') if $_[0]->has_context;
+        my $self = shift;
+
+        $self->has_app
+            and return $self->app->setting('show_errors');
     },
 );
 
@@ -111,10 +120,10 @@ sub _build_error_template {
     # look for a template named after the status number.
     # E.g.: views/404.tt  for a TT template
     return $self->status
-      if -f $self->context->app->engine('template')
+      if -f $self->app->engine('template')
           ->view_pathname( $self->status );
 
-    return undef;
+    return;
 }
 
 has static_page => (
@@ -128,12 +137,12 @@ sub _build_static_page {
 
     # TODO there must be a better way to get it
     my $public_dir = $ENV{DANCER_PUBLIC}
-      || ( $self->has_context
-        && path( $self->context->app->config_location, 'public' ) );
+      || ( $self->has_app
+        && path( $self->app->config_location, 'public' ) );
 
     my $filename = sprintf "%s/%d.html", $public_dir, $self->status;
 
-    open my $fh, $filename or return undef;
+    open my $fh, $filename or return;
 
     local $/ = undef;    # slurp time
 
@@ -146,12 +155,18 @@ sub default_error_page {
 
     require Template::Tiny;
 
-    my $uri_base = $self->has_context ?
-        $self->context->request->uri_base : '';
+    my $uri_base = $self->has_app ?
+        $self->app->request->uri_base : '';
+
+    my $message = $self->message;
+    if ( $self->show_errors && $self->exception) {
+        $message .= "\n" . $self->exception;
+    }
+
     my $opts = {
         title    => $self->title,
         charset  => $self->charset,
-        content  => $self->message,
+        content  => $message,
         version  => Dancer2->VERSION,
         uri_base => $uri_base,
     };
@@ -201,8 +216,10 @@ The message of the error page.
 =cut
 
 has message => (
-    is  => 'ro',
-    isa => Str,
+    is      => 'ro',
+    isa     => Str,
+    lazy    => 1,
+    default => sub { '' },
 );
 
 sub full_message {
@@ -215,41 +232,49 @@ sub full_message {
 
 has serializer => (
     is        => 'ro',
-    isa       => ConsumerOf ['Dancer2::Core::Role::Serializer'],
-    predicate => 1,
+    isa       => Maybe[ConsumerOf ['Dancer2::Core::Role::Serializer']],
+    builder   => '_build_serializer',
 );
+
+sub _build_serializer {
+    my ($self) = @_;
+
+    $self->has_app
+        and return $self->app->engine('serializer');
+
+    return;
+}
 
 has session => (
     is  => 'ro',
     isa => ConsumerOf ['Dancer2::Core::Role::Session'],
 );
 
-has context => (
-    is        => 'ro',
-    isa       => InstanceOf ['Dancer2::Core::Context'],
-    predicate => 1,
-);
-
 sub BUILD {
     my ($self) = @_;
 
-    $self->has_context &&
-      $self->context->app->execute_hook( 'core.error.init', $self );
+    $self->has_app &&
+      $self->app->execute_hook( 'core.error.init', $self );
 }
 
 has exception => (
-    is  => 'ro',
-    isa => Str,
+    is        => 'ro',
+    isa       => Str,
+    predicate => 1,
+    coerce    => sub {
+        # Until we properly support exception objects, we shouldn't barf on
+        # them because that hides the actual error, if object overloads "",
+        # which most exception objects do, this will result in a nicer string.
+        # other references will produce a meaningless error, but that is
+        # better than a meaningless stacktrace
+        return "$_[0]"
+    }
 );
 
 has response => (
     is      => 'rw',
     lazy    => 1,
-    default => sub {
-        $_[0]->has_context
-          ? $_[0]->context->response
-          : Dancer2::Core::Response->new;
-    },
+    default => sub { Dancer2::Core::Response->new }
 );
 
 has content_type => (
@@ -257,7 +282,7 @@ has content_type => (
     lazy    => 1,
     default => sub {
         my $self = shift;
-        $self->has_serializer
+        $self->serializer
             ? $self->serializer->content_type
             : 'text/html'
     },
@@ -270,22 +295,22 @@ has content => (
         my $self = shift;
 
         # Apply serializer
-        if ( $self->has_serializer ) {
+        if ( $self->serializer ) {
             my $content = {
                 message => $self->message,
                 title   => $self->title,
                 status  => $self->status,
             };
             $content->{exception} = $self->exception
-                if defined $self->{exception};
+              if $self->has_exception;
             return $self->serializer->serialize($content);
         }
 
         # Otherwise we check for a template, for a static file and,
         # if all else fail, the default error page
 
-        if ( $self->has_context and $self->template ) {
-            return $self->context->app->template(
+        if ( $self->has_app and $self->template ) {
+            return $self->app->template(
                 $self->template,
                 {   title     => $self->title,
                     content   => $self->message,
@@ -295,7 +320,8 @@ has content => (
             );
         }
 
-        if ( my $content = $self->static_page ) {
+        # It doesn't make sense to return a static page if show_errors is on
+        if ( !$self->show_errors && (my $content = $self->static_page) ) {
             return $content;
         }
 
@@ -306,30 +332,29 @@ has content => (
 =method throw($response)
 
 Populates the content of the response with the error's information.
-If I<$response> is not given, acts on the I<context>
+If I<$response> is not given, acts on the I<app>
 attribute's response.
 
 =cut
 
 sub throw {
     my $self = shift;
-    $self->response(shift) if @_;
+    $self->set_response(shift) if @_;
 
-    croak "error has no response to throw at" unless $self->response;
+    $self->response
+        or croak "error has no response to throw at";
 
-    $self->has_context &&
-        $self->context->app->execute_hook( 'core.error.before', $self );
+    $self->has_app &&
+        $self->app->execute_hook( 'core.error.before', $self );
 
     my $message = $self->content;
-    $message .= "\n\n" . $self->exception
-      if $self->show_errors && defined $self->exception;
 
     $self->response->status( $self->status );
     $self->response->content_type( $self->content_type );
     $self->response->content($message);
 
-    $self->has_context &&
-        $self->context->app->execute_hook('core.error.after', $self->response);
+    $self->has_app &&
+        $self->app->execute_hook('core.error.after', $self->response);
 
     $self->response->halt(1);
     return $self->response;
@@ -342,15 +367,21 @@ Create a backtrace of the code where the error is caused.
 This method tries to find out where the error appeared according to the actual
 error message (using the C<message> attribute) and tries to parse it (supporting
 the regular/default Perl warning or error pattern and the L<Devel::SimpleTrace>
-output) and then returns an error-higlighted C<message>.
+output) and then returns an error-highlighted C<message>.
 
 =cut
 
 sub backtrace {
     my ($self) = @_;
 
-    my $message =
-      qq|<pre class="error">| . _html_encode( $self->message ) . "</pre>";
+    my $message = $self->exception ? $self->exception : $self->message;
+    $message =
+      qq|<pre class="error">| . _html_encode( $message ) . "</pre>";
+
+    if ( $self->exception && !ref($self->exception) ) {
+        $message .= qq|<pre class="error">|
+                 . _html_encode($self->exception) . "</pre>";
+    }
 
     # the default perl warning/error pattern
     my ( $file, $line ) = ( $message =~ /at (\S+) line (\d+)/ );
@@ -455,7 +486,7 @@ C<get_caller>), the settings and environment (using C<dumper>) and more.
 sub environment {
     my ($self) = @_;
 
-    my $request = $self->has_context ? $self->context->request : 'TODO';
+    my $request = $self->has_app ? $self->app->request : 'TODO';
     my $r_env = {};
     $r_env = $request->env if defined $request;
 
@@ -485,7 +516,7 @@ sub environment {
 
 =method get_caller
 
-Creates a strack trace of callers.
+Creates a stack trace of callers.
 
 =cut
 
@@ -547,6 +578,8 @@ html_encode() doesn't do any UTF black magic.
 # Replaces the entities that are illegal in (X)HTML.
 sub _html_encode {
     my $value = shift;
+
+    return if !defined $value;
 
     $value =~ s/&/&amp;/g;
     $value =~ s/</&lt;/g;

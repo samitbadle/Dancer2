@@ -68,7 +68,7 @@ for my $session_expires ( 3600, '1h', '1 hour' ) {
             use Dancer2;
 
             get '/has_session' => sub {
-                return context->has_session;
+                return app->has_session;
             };
 
             get '/foo/set_session/*' => sub {
@@ -83,7 +83,7 @@ for my $session_expires ( 3600, '1h', '1 hour' ) {
 
             get '/foo/destroy_session' => sub {
                 my $name = session('name') || '';
-                context->destroy_session;
+                app->destroy_session;
                 return "destroyed='$name'";
             };
 
@@ -110,7 +110,8 @@ for my $session_expires ( 3600, '1h', '1 hour' ) {
                 port         => $port
             );
 
-            Dancer2->runner->server->port($port);
+            # we're overiding a RO attribute only for this test!
+            Dancer2->runner->{'port'} = $port;
             start;
         },
     );

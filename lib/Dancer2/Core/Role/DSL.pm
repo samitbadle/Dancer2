@@ -1,6 +1,6 @@
+package Dancer2::Core::Role::DSL;
 # ABSTRACT: Role for DSL
 
-package Dancer2::Core::Role::DSL;
 use Moo::Role;
 use Dancer2::Core::Types;
 use Carp 'croak';
@@ -71,8 +71,8 @@ sub _compile_keyword {
     if ( !$is_global ) {
         my $code = $compiled_code;
         $compiled_code = sub {
-            croak "Function '$keyword' must be called from a route handler"
-              unless defined $self->app->context;
+            $self->app->has_request or
+                croak "Function '$keyword' must be called from a route handler";
             $code->(@_);
         };
     }

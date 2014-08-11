@@ -139,8 +139,22 @@ before content => sub {
     my $self = shift;
     if (ref($_[0]) and $self->has_serializer) {
         $_[0] = $self->serialize($_[0]);
+        $self->is_encoded(1); # All serializers return byte strings
     }
 };
+
+=attr default_content_type
+
+Default mime type to use for the response Content-Type header
+if nothing was specified
+
+=cut
+
+has default_content_type => (
+    is      => 'rw',
+    isa     => Str,
+    default => sub {'text/html'},
+);
 
 =method encode_content
 
@@ -157,6 +171,8 @@ cases it returns C<false>.
 sub encode_content {
     my ($self) = @_;
     return if $self->is_encoded;
+    # Apply default content type if none set.
+    $self->content_type or $self->content_type($self->default_content_type);
     return if $self->content_type !~ /^text/;
 
     # we don't want to encode an empty string, it will break the output
@@ -181,6 +197,10 @@ Converts the response object to a PSGI array.
 
 sub to_psgi {
     my ($self) = @_;
+    # It is possible to have no content and/or no content type set
+    # e.g. if all routes 'pass'. Apply defaults here..
+    $self->content_type or $self->content_type($self->default_content_type);
+    $self->content('') if ! defined $self->content;
     return [ $self->status, $self->headers_to_array, [ $self->content ], ];
 }
 
@@ -264,7 +284,7 @@ sub error {
 
     $response->serialize( $content );
 
-Serialize and return $content with the respone's serializer.
+Serialize and return $content with the response's serializer.
 set content-type accordingly.
 
 =cut

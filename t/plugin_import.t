@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 use Test::More;
+use Plack::Test;
+use HTTP::Request::Common;
 
 {
     use Dancer2;
@@ -13,10 +15,18 @@ use Test::More;
     };
 }
 
-use Dancer2::Test;
+my $app = Dancer2->runner->psgi_app;
+is( ref $app, 'CODE', 'Got app' );
 
-response_content_is '/test', 'dancer_plugin_with_import_keyword',
-  "the plugin exported its keyword";
+test_psgi $app, sub {
+    my $cb = shift;
+
+    is(
+        $cb->( GET '/test' )->content,
+        'dancer_plugin_with_import_keyword',
+        'the plugin exported its keyword',
+    );
+};
 
 is_deeply(
     t::lib::PluginWithImport->stuff,
@@ -31,7 +41,7 @@ subtest 'import flags' => sub {
 
         register 'foo' => sub { request };
     ";
-    like $@, qr{Bareword "request" not allowed while "strict subs"}, 
+    like $@, qr{Bareword "request" not allowed while "strict subs"},
       "with :no_dsl, the Dancer's dsl is not imported.";
 
     eval "

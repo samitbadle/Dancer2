@@ -3,11 +3,11 @@ package Dancer2::Config;
 
 =head1 DESCRIPTION
 
-The Dancer2 configuration (as implemented by L<Dancer2::Core::Role::Config>)
-handles reading and changing the configuration of your Dancer2 apps.  This
-document describes how to manipulate Dancer2's configuration settings (through
-code or by file), and to document the various settings that are available in
-Dancer2.
+The Dancer2 configuration (as implemented by
+L<Dancer2::Core::Role::ConfigReader>) handles reading and changing the
+configuration of your Dancer2 apps.  This document describes how to
+manipulate Dancer2's configuration settings (through code or by file),
+and to document the various settings that are available in Dancer2.
 
 =head1 MANIPULATING SETTINGS VIA CODE
 
@@ -124,11 +124,6 @@ The port Dancer2 will listen to.
 
 Default value is 3000. This setting can be changed on the command-line with the
 B<--port> switch.
-
-=head3 daemon (boolean)
-
-If set to true, runs the standalone webserver in the background.
-This setting can be changed on the command-line with the B<--daemon> flag.
 
 =head3 behind_proxy (boolean)
 
@@ -264,7 +259,7 @@ L<Dancer2::Config::Object> for more information.
 =head3 startup_info (boolean)
 
 If set to true, prints a banner at the server start with information such as
-versions and the environment (or "dancerfloor").
+versions and the environment (or "dancefloor").
 
 Conforms to the environment variable C<DANCER_STARTUP_INFO>.
 
@@ -297,6 +292,15 @@ with L<Dancer2::Logger::Console>:
     logger: Console
 
 Loggers are configured with a corresponding L</Logger engine> section, as
+shown below.
+
+=head3 session (enum)
+
+This setting lets you enable a session engine for your web application. By
+default, sessions are disabled in Dancer2, you must choose a session engine to
+use them.
+
+Sessions are configured with a corresponding L</Session engine> section, as
 shown below.
 
 =head3 show_errors (boolean)
@@ -372,32 +376,47 @@ you'll likely want C<error> or C<warning> only, for less-chatty logs.
 
 =head2 Session engine
 
-=head3 session (enum)
+The session engine is configured in the C<engines> section.
 
-This setting lets you enable a session engine for your web application. Be
-default, sessions are disabled in Dancer2, you must choose a session engine to
-use them.
+   session: Simple
 
-See L<Dancer2::Core::Session> for supported engines and their respective configuration.
+   engines:
+     session:
+       Simple:
+         cookie_name: dance.set
+         cookie_duration: '24 hours'
+         is_secure: 1
+         is_http_only: 1
 
-=head3 session_expires
+See L<Dancer2::Core::Role::SessionFactory> for more detailed documentation
+for these options, or the particular session engine for other supported options.
+
+=head3 cookie_name
+
+The name of the cookie to store the session ID in.  Defaults to
+C<dancer.session>.  This can be overridden by certain session engines.
+
+=head3 cookie_domain
+
+The domain of the cookie. By default there is no domain defined for the cookie.
+
+=head3 cookie_path
+
+The path of the cookie. By default there is no path defined for the cookie.
+
+=head3 cookie_duration
 
 The session expiry time in seconds, or as e.g. "2 hours" (see
 L<Dancer2::Core::Cookie/expires>.  By default, there is no specific expiry
 time.
 
-=head3 session_name
+=head3 is_secure
 
-The name of the cookie to store the session ID in.  Defaults to
-C<dancer.session>.  This can be overridden by certain session engines.
-
-=head3 session_secure
-
-The user's session ID is stored in a cookie.  If the C<session_secure> setting
+The user's session ID is stored in a cookie.  If the C<is_secure> setting
 is set to a true value, the cookie will be marked as secure, meaning it should
 only be sent over HTTPS connections.
 
-=head3 session_is_http_only
+=head3 is_http_only
 
 This setting defaults to 1 and instructs the session cookie to be
 created with the C<HttpOnly> option active, meaning that JavaScript
@@ -425,6 +444,20 @@ C</foo/bar.tt>.
 Dancer2 will honor your C<before_template_render> code, and all default
 variables. They will be accessible and interpolated on automatic
 served pages.
+
+=head2 dsl_class
+
+For complex applications that require extended DSL keywords or other
+functionality the DSL class used can be specified at import time or in the
+config settings.
+
+    dsl_class: 'My::DSL'
+
+This is the same as specifying
+
+    use Dancer2 dsl => 'My::DSL'
+
+in your module. dsl_class defaults to L<Dancer2::Core::DSL> if not specified
 
 =head2 DANCER_CONFDIR and DANCER_ENVDIR
 

@@ -29,9 +29,9 @@ Now point your browser to [http://localhost:3000](http://localhost:3000) and voi
 * [Dancer's Website](http://perldancer.org)
 * [Most recent release on CPAN](https://metacpan.org/release/Dancer2)
 * [Builds status on Travis](https://travis-ci.org/PerlDancer/Dancer2)
-* [Our Mailing List](http://list.perldancer.org/cgi-bin/listinfo/dancer-users)
+* [Our Mailing List](http://lists.preshweb.co.uk/mailman/listinfo/dancer-users)
 * [Follow us on Twitter](https://twitter.com/perldancer)
-* [Find us on irc.perl.org #dancer](irc://irc.perl.org/#dancer)
+* [Find us on irc.perl.org #dancer](http://perldancer.org/irc)
 * [The Advent Calendar](http://advent.perldancer.org/)
 * [Contribution/Git Guide](https://github.com/PerlDancer/Dancer2/blob/master/GitGuide.md)
 
@@ -55,6 +55,7 @@ Now point your browser to [http://localhost:3000](http://localhost:3000) and voi
 | Dancer2::Plugin::Queue | [Link](https://metacpan.org/module/Dancer2::Plugin::Queue) | [Link](https://github.com/dagolden/dancer2-plugin-queue) |
 | Dancer2::Plugin::Database | [Link](https://metacpan.org/module/Dancer2::Plugin::Database) | [Link](https://github.com/bigpresh/Dancer-Plugin-Database/tree/master/Dancer2) |
 | Dancer2::Plugin::Feed | [Link](https://metacpan.org/module/Dancer2::Plugin::Feed) | [Link](https://github.com/hobbestigrou/Dancer2-Plugin-Feed) |
+| Dancer2::Plugin::Sixpack | [Link](https://metacpan.org/module/Dancer2::Plugin::Sixpack) | [Link](https://github.com/b10m/p5-Dancer2-Plugin-Sixpack) |
 
 
 ## Templates engines
